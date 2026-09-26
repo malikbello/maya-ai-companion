@@ -13,6 +13,7 @@ Or directly:
 
 import asyncio
 import json
+import time
 import logging
 import os
 import sys
@@ -21,17 +22,20 @@ from pathlib import Path
 # ── path setup ────────────────────────────────────────────────────────────────
 AI_DIR = Path(__file__).parent.parent / "ai_companion"
 sys.path.insert(0, str(AI_DIR))
+# sibling modules (function_map, public_mode) when run as webapp.server
+sys.path.insert(0, str(Path(__file__).parent))
 
 from dotenv import load_dotenv
 load_dotenv(AI_DIR / ".env")
 
 import websockets
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from function_map import run_function, build_settings_config
+import public_mode as pm
 from pydantic import BaseModel
 import urllib.request
 import urllib.parse
@@ -39,8 +43,48 @@ import urllib.parse
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)s  %(message)s")
 log = logging.getLogger("MAYA-Web")
 
-app = FastAPI(title="MAYA Web")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="MAYA Web", docs_url=None if pm.PUBLIC else "/docs", redoc_url=None, openapi_url=None if pm.PUBLIC else "/openapi.json")
+# The page is served from this same origin, so public mode needs no CORS at all.
+if not pm.PUBLIC:
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; media-src 'self' blob:; "
+    "worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
+    if pm.PUBLIC:
+        response.headers["Content-Security-Policy"] = _CSP
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+def _client_ip(scope_headers, fallback: str) -> str:
+    # Behind the host's proxy the socket peer is the proxy; the first
+    # X-Forwarded-For hop is the visitor.
+    fwd = scope_headers.get("x-forwarded-for", "")
+    return fwd.split(",")[0].strip() or fallback
+
+
+# ── /config — what the page should show about this deployment ────────────────
+@app.get("/config")
+async def config():
+    if not pm.PUBLIC:
+        return {"mode": "personal"}
+    return {
+        "mode": "public",
+        "session_seconds": pm.LIMITS["session_seconds"],
+        **pm.gate.status(),
+    }
 
 # ── /health ───────────────────────────────────────────────────────────────────
 @app.get("/health")
@@ -56,6 +100,10 @@ class FnRequest(BaseModel):
 
 @app.post("/function")
 async def call_function(req: FnRequest):
+    # Public mode has no session outside the voice socket, and every UI
+    # shortcut that uses this endpoint drives a personal integration.
+    if pm.PUBLIC:
+        return JSONResponse(pm.BLOCKED_REPLY, status_code=403)
     try:
         result = run_function(req.name, req.args)
         return result
@@ -70,6 +118,8 @@ async def get_lyrics(artist: str = "", title: str = ""):
     Multi-source lyrics lookup.  Returns lrc_lines (timestamps) when available
     so the frontend can advance the glow in sync with the song.
     """
+    if pm.PUBLIC:
+        return JSONResponse({"found": False, "reason": "unavailable"}, status_code=403)
     loop = asyncio.get_event_loop()
     try:
         # Resolve track from Spotify if not supplied
@@ -171,14 +221,44 @@ async def get_lyrics(artist: str = "", title: str = ""):
 # ── /ws  — voice proxy ────────────────────────────────────────────────────────
 @app.websocket("/ws")
 async def voice_proxy(browser_ws: WebSocket):
+    if not pm.origin_allowed(browser_ws.headers.get("origin"), browser_ws.headers.get("host")):
+        await browser_ws.close(code=1008)
+        return
     await browser_ws.accept()
-    log.info("Browser connected")
 
     dg_key = os.getenv("DEEPGRAM_API_KEY")
     if not dg_key:
-        await browser_ws.send_json({"type": "Error", "message": "DEEPGRAM_API_KEY not set"})
+        await browser_ws.send_json({"type": "Error", "message": "Voice service is not configured."})
         await browser_ws.close()
         return
+
+    sid = None
+    if pm.PUBLIC:
+        ip = _client_ip(browser_ws.headers, browser_ws.client.host if browser_ws.client else "?")
+        refusal = pm.gate.admit(ip)
+        if refusal:
+            await browser_ws.send_json({"type": "Limit", "message": refusal})
+            await browser_ws.close()
+            return
+        sid = pm.new_session()
+    started = time.monotonic()
+    log.info("Browser connected")
+    try:
+        await _proxy(browser_ws, dg_key, sid)
+    finally:
+        if pm.PUBLIC:
+            pm.gate.release(time.monotonic() - started)
+            pm.end_session(sid)
+
+
+def _run_in_session(sid, fname, args):
+    if pm.blocked(fname):
+        return dict(pm.BLOCKED_REPLY)
+    with pm.session_state(sid):
+        return run_function(fname, args)
+
+
+async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
 
     dg_url = "wss://agent.deepgram.com/v1/agent/converse"
 
@@ -192,11 +272,27 @@ async def voice_proxy(browser_ws: WebSocket):
             log.info("Connected to Deepgram Voice Agent")
 
             # Send full agent configuration
-            config = build_settings_config()
+            with pm.session_state(sid):
+                config = pm.filter_settings(build_settings_config())
             await dg_ws.send(json.dumps(config))
             log.info("Settings sent to Deepgram")
 
             stop_event = asyncio.Event()
+
+            async def session_timer():
+                """Public sessions end on time; the page is told why."""
+                if not pm.PUBLIC:
+                    return
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=pm.LIMITS["session_seconds"])
+                except asyncio.TimeoutError:
+                    stop_event.set()
+                    try:
+                        await browser_ws.send_json({"type": "Limit", "message": "That's the end of this demo session. Thanks for talking with MAYA."})
+                        await browser_ws.close()
+                    except Exception:
+                        pass
+                    await dg_ws.close()
 
             async def browser_to_deepgram():
                 """Forward mic audio from browser → Deepgram."""
@@ -206,6 +302,9 @@ async def voice_proxy(browser_ws: WebSocket):
                         await dg_ws.send(data)
                 except (WebSocketDisconnect, Exception):
                     stop_event.set()
+                    # unblock deepgram_to_browser so the session ends (and
+                    # its metered slot is released) as soon as the visitor leaves
+                    await dg_ws.close()
 
             async def deepgram_to_browser():
                 """Forward Deepgram messages → browser, intercepting function calls."""
@@ -244,7 +343,7 @@ async def voice_proxy(browser_ws: WebSocket):
                                 try:
                                     loop = asyncio.get_running_loop()
                                     result = await loop.run_in_executor(
-                                        None, run_function, fname, args
+                                        None, _run_in_session, sid, fname, args
                                     )
                                 except Exception as exc:
                                     log.error(f"Function {fname} error: {exc}")
@@ -280,12 +379,14 @@ async def voice_proxy(browser_ws: WebSocket):
             await asyncio.gather(
                 browser_to_deepgram(),
                 deepgram_to_browser(),
+                session_timer(),
             )
 
     except Exception as exc:
         log.error(f"Proxy error: {exc}")
         try:
-            await browser_ws.send_json({"type": "Error", "message": str(exc)})
+            # internal detail stays in the log; the visitor gets a plain message
+            await browser_ws.send_json({"type": "Error", "message": "MAYA could not reach the voice service. Please try again." if pm.PUBLIC else str(exc)})
         except Exception:
             pass
     finally:

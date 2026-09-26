@@ -30,6 +30,9 @@ ai_companion/alarms.json
 ai_companion/reminders.json
 webapp/users/
 webapp/health_profile.json
+# the webapp runs from the repo root, so its state lands here too
+/users/
+/health_profile.json
 
 # OAuth tokens / credentials — never commit these
 ai_companion/.spotify_token_cache

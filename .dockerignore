@@ -1,0 +1,20 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+cleanenv/
+**/.env
+**/.spotify_token_cache
+**/google_credentials.json
+**/google_token.json
+# personal runtime state never goes into an image
+**/users/
+**/health_profile.json
+**/alarms.json
+**/reminders.json
+**/memory_db/
+**/logs/
+# the offline speech model is for the native pipeline only (68 MB)
+ai_companion/models/
+**/*.wav
+**/*.mp3

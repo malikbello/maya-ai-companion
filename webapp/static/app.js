@@ -395,6 +395,11 @@ function openWebSocket() {
     else if (t === 'UICard') {
       showCard(msg.ui_type, msg.ui_data||{}, msg.result_text||'');
     }
+    else if (t === 'Limit') {
+      // public demo: session length, concurrency or daily budget reached
+      if (msg.message) addTranscript('assistant', msg.message);
+      stopSession();
+    }
     else if (t === 'Error') {
       setStatus('error','Error'); console.error('MAYA:', msg.message);
       if (msg.message) addTranscript('assistant', `⚠ ${msg.message}`);
@@ -524,3 +529,13 @@ window._spCmd = async function(name, args) {
     }
   } catch (err) { console.error('Spotify cmd:', err); }
 };
+
+// Public demo: say up front what this deployment can and cannot do.
+fetch('/config').then(r => r.json()).then(cfg => {
+  if (cfg.mode !== 'public') return;
+  const note = document.getElementById('demoNote');
+  if (!note) return;
+  const mins = Math.round((cfg.session_seconds || 180) / 60);
+  note.textContent = `Web demo: sessions last ${mins} minutes and nothing you say is kept. Spotify, Telegram, SOS and the motion sensor run on MAYA's home device.`;
+  note.hidden = false;
+}).catch(() => {});

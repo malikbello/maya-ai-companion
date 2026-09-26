@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 from datetime import datetime, date, timedelta
@@ -35,16 +36,19 @@ _MAX_LOG = 30
 
 
 def load_profile():
+    # deep copies: a shallow copy shares the log lists, so every appended
+    # entry would leak into DEFAULT_PROFILE and from there into new profiles
     if not os.path.exists(FILE_NAME):
-        save_profile(DEFAULT_PROFILE.copy())
-        return DEFAULT_PROFILE.copy()
+        profile = copy.deepcopy(DEFAULT_PROFILE)
+        save_profile(profile)
+        return profile
     with open(FILE_NAME, "r") as f:
         profile = json.load(f)
     # Backward compat: add any new fields silently
     changed = False
     for key, default in DEFAULT_PROFILE.items():
         if key not in profile:
-            profile[key] = default
+            profile[key] = copy.deepcopy(default)
             changed = True
     if changed:
         save_profile(profile)

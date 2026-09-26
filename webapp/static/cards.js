@@ -476,14 +476,14 @@ function renderSpotify(d) {
       </div>
     </div>
     <div class="sp-controls">
-      <button class="sp-ctrl-btn" onclick="window._spCmd('previous_track',{})" title="Previous">⏮</button>
-      <button class="sp-ctrl-btn" onclick="window._spCmd('pause_spotify',{})"  title="Pause">⏸</button>
-      <button class="sp-ctrl-btn sp-ctrl-btn--play" onclick="window._spCmd('resume_spotify',{})" title="Play">▶</button>
-      <button class="sp-ctrl-btn" onclick="window._spCmd('skip_track',{})"     title="Next">⏭</button>
+      <button class="sp-ctrl-btn" data-sp="previous_track" title="Previous">⏮</button>
+      <button class="sp-ctrl-btn" data-sp="pause_spotify"  title="Pause">⏸</button>
+      <button class="sp-ctrl-btn sp-ctrl-btn--play" data-sp="resume_spotify" title="Play">▶</button>
+      <button class="sp-ctrl-btn" data-sp="skip_track"     title="Next">⏭</button>
     </div>
     ${canLyrics ? `
     <div class="sp-lyrics-row">
-      <button class="sp-lyrics-btn" onclick="window._loadLyrics(this)">♪ Show Lyrics</button>
+      <button class="sp-lyrics-btn" data-action="lyrics">♪ Show Lyrics</button>
     </div>` : ''}
   </div>`;
 }
@@ -560,7 +560,7 @@ window._updateSpotifyCard = function(card, d) {
   if (canLyrics && !lyrRow) {
     lyrRow = document.createElement('div');
     lyrRow.className = 'sp-lyrics-row';
-    lyrRow.innerHTML = '<button class="sp-lyrics-btn" onclick="window._loadLyrics(this)">♪ Show Lyrics</button>';
+    lyrRow.innerHTML = '<button class="sp-lyrics-btn" data-action="lyrics">♪ Show Lyrics</button>';
     card.appendChild(lyrRow);
   }
 };
@@ -614,7 +614,7 @@ function renderLyricsCard(data) {
   const stanzaHTML = stanzas.map(stanza =>
     `<div class="lyrics-stanza">${stanza.map(({text, idx}) => {
       const delay = Math.min(idx * 35, 2000);
-      return `<div class="lyrics-line" data-lyr-idx="${idx}" style="animation-delay:${delay}ms" onclick="window._lyricsJump(this)">${text}</div>`;
+      return `<div class="lyrics-line" data-lyr-idx="${idx}" style="animation-delay:${delay}ms" data-action="lyrics-jump">${text}</div>`;
     }).join('')}</div>`
   ).join('');
 
@@ -1130,7 +1130,7 @@ function getHistoryItem(uiType, uiData, resultText) {
   const timeStr  = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
   const preview  = (resultText || '').slice(0, 60) + ((resultText||'').length > 60 ? '…' : '');
   return `
-    <div class="history-item" onclick="window._replayCard('${uiType}', this)">
+    <div class="history-item" data-replay="${uiType}">
       <div><span class="history-item-badge badge-${badgeKey}">${icon} ${badgeKey.toUpperCase()}</span></div>
       <div class="history-item-text">${preview}</div>
       <div class="history-item-time">${timeStr}</div>
@@ -1138,3 +1138,14 @@ function getHistoryItem(uiType, uiData, resultText) {
 }
 
 window.CardRenderer = { renderCard, getCardBadge, getHistoryItem };
+
+// One delegated listener instead of inline onclick attributes, so the page
+// runs under a Content-Security-Policy that forbids inline script.
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-sp],[data-action],[data-replay]');
+  if (!el) return;
+  if (el.dataset.sp) window._spCmd(el.dataset.sp, {});
+  else if (el.dataset.replay) window._replayCard(el.dataset.replay, el);
+  else if (el.dataset.action === 'lyrics') window._loadLyrics(el);
+  else if (el.dataset.action === 'lyrics-jump') window._lyricsJump(el);
+});

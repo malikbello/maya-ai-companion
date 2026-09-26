@@ -1,0 +1,11 @@
+# Top-level dependencies of the web app. requirements.txt pins the full tree:
+#   pip install -r webapp/requirements.in && pip freeze > webapp/requirements.txt
+fastapi
+uvicorn
+websockets
+python-dotenv
+pydantic
+requests
+feedparser
+spotipy
+syncedlyrics
