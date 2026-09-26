@@ -25,14 +25,21 @@ LOG_DIR.mkdir(exist_ok=True)
 log_file = LOG_DIR / f"ai_companion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
 # Setup logging with UTF-8 encoding
+# INFO by default. At DEBUG, the websockets and HTTP client libraries log
+# raw request headers, which include the Deepgram and OpenAI API keys.
+_level = getattr(logging, os.getenv("MAYA_LOG_LEVEL", "INFO").upper(), logging.INFO)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file, encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
+
+# Header-level logging stays off even when MAYA_LOG_LEVEL=DEBUG.
+for _noisy in ("websockets", "websockets.client", "httpx", "httpcore", "urllib3", "openai", "deepgram"):
+    logging.getLogger(_noisy).setLevel(max(_level, logging.INFO))
 
 # Get logger
 logger = logging.getLogger("AI_Companion")
