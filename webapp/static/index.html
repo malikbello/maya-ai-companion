@@ -7,7 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=14" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <meta name="description" content="MAYA, a voice AI health companion: talk to track sleep, mood, water and medication, set reminders and hear the weather." />
+  <link rel="stylesheet" href="style.css?v=16" />
 </head>
 <body>
 
@@ -36,7 +38,7 @@
 
   <div class="header-status">
     <div class="status-dot" id="statusDot"></div>
-    <span class="status-text" id="statusText">Initializing…</span>
+    <span class="status-text" id="statusText">Offline</span>
   </div>
 
   <div class="header-actions">
@@ -104,6 +106,7 @@
         </svg>
       </button>
       <span class="mic-hint" id="micHint">Tap to speak with MAYA</span>
+      <p class="demo-note" id="demoNote" hidden></p>
     </div>
 
   </section>
@@ -157,9 +160,9 @@
 </div>
 
 <!-- scripts — load in dependency order -->
-<script src="orb.js?v=14"   defer></script>
-<script src="cards.js?v=14" defer></script>
-<script src="app.js?v=14"   defer></script>
+<script src="orb.js?v=16"   defer></script>
+<script src="cards.js?v=16" defer></script>
+<script src="app.js?v=16"   defer></script>
 
 </body>
 </html>

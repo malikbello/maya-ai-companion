@@ -15,6 +15,36 @@ The native voice pipeline (`ai_companion/main.py`) needs direct microphone/speak
 access (and Raspberry Pi GPIO in motion-detection mode), so it's designed to run
 natively on the host rather than inside the container — see `SETUP.txt`.
 
+### Public mode
+
+`MAYA_MODE=public` serves the webapp to anonymous visitors safely:
+
+- **Personal integrations are off.** Spotify, Telegram, the motion sensor and the
+  emergency SOS flow are removed from the agent's tool list and refused by the
+  dispatcher; `/function` and `/lyrics` return 403.
+- **Every voice session gets its own throwaway state.** Health logs, reminders and
+  names live in a per-session temp directory that is deleted when the call ends.
+- **Sessions are metered**, because each one spends speech credits: a length cap,
+  per-IP hourly limit, concurrency cap and a daily budget of agent minutes.
+- **Hardened HTTP surface:** WebSocket origin check, strict Content-Security-Policy
+  (no inline script), HSTS, no CORS, no API docs, non-root container.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DEEPGRAM_API_KEY` | — | Required. Deepgram Voice Agent key. |
+| `WEATHER_API_KEY` | — | OpenWeatherMap key for weather cards. |
+| `MAYA_MODE` | `personal` | `public` enables everything above. |
+| `MAYA_SESSION_SECONDS` | `180` | Length of one voice session. |
+| `MAYA_SESSIONS_PER_IP_HOUR` | `4` | Sessions one visitor can start per hour. |
+| `MAYA_MAX_CONCURRENT` | `3` | Simultaneous sessions. |
+| `MAYA_DAILY_MINUTES` | `60` | Total agent minutes per UTC day. |
+| `MAYA_ALLOWED_ORIGINS` | — | Extra origins allowed to open the voice socket. |
+
+```bash
+pip install -r webapp/requirements.txt pytest httpx
+python -m pytest webapp/tests -q   # public-mode guarantees
+```
+
 ---
 
 ## What MAYA Does — End to End

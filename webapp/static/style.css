@@ -321,6 +321,7 @@ body{
 /* ripple rings hidden — glow is driven by JS only when mic picks up voice */
 .mic-ripple{display:none}
 .mic-hint{font-size:11px;color:var(--text-3);letter-spacing:.5px}
+.demo-note{max-width:34ch;margin:10px auto 0;font-size:11px;line-height:1.5;color:var(--text-3);text-align:center}
 
 /* ── right panel ────────────────────────────────────────────────────────── */
 .card-container{flex:1;overflow-y:auto;padding:14px 12px}
@@ -953,3 +954,4 @@ body{
 /* ════════════ RESPONSIVE ═══════════════════════════════════════════════ */
 @media(max-width:960px){.app-main{grid-template-columns:220px 1fr} .panel-right{display:none}}
 @media(max-width:660px){.app-main{grid-template-columns:1fr} .panel-left{display:none}}
+@media(max-width:480px){.header-time,.logo-sub{display:none} .app-header{padding-left:14px;padding-right:14px}}
