@@ -955,3 +955,11 @@ body{
 @media(max-width:960px){.app-main{grid-template-columns:220px 1fr} .panel-right{display:none}}
 @media(max-width:660px){.app-main{grid-template-columns:1fr} .panel-left{display:none}}
 @media(max-width:480px){.header-time,.logo-sub{display:none} .app-header{padding-left:14px;padding-right:14px}}
+
+/* reminder coming due */
+.reminder-due-card{border-color:rgba(255,196,0,.45);box-shadow:0 0 0 1px rgba(255,196,0,.25),0 0 32px rgba(255,196,0,.18);animation:reminderPulse 2.6s ease-in-out infinite}
+.reminder-due-time{margin-left:auto;font-size:12px;color:var(--text-2)}
+.reminder-due-text{font-size:20px;font-weight:600;color:var(--text-1,#e8f0ff);margin:6px 0 10px}
+.reminder-due-hint{font-size:11px;color:var(--text-3)}
+@keyframes reminderPulse{50%{box-shadow:0 0 0 1px rgba(255,196,0,.4),0 0 48px rgba(255,196,0,.3)}}
+@media (prefers-reduced-motion:reduce){.reminder-due-card{animation:none}}

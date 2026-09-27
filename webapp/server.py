@@ -251,6 +251,15 @@ async def voice_proxy(browser_ws: WebSocket):
             pm.end_session(sid)
 
 
+REMINDER_POLL_SECONDS = 5
+
+
+def _due_reminders(sid):
+    from reminders import check_reminders
+    with pm.session_state(sid):
+        return check_reminders()
+
+
 def _run_in_session(sid, fname, args):
     if pm.blocked(fname):
         return dict(pm.BLOCKED_REPLY)
@@ -376,10 +385,31 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
                     log.error(f"Deepgram→browser error: {exc}")
                     stop_event.set()
 
+            async def reminder_watcher():
+                """A reminder that comes due rings in the page and MAYA
+                says it aloud, the same as on the home device."""
+                loop = asyncio.get_running_loop()
+                while not stop_event.is_set():
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=REMINDER_POLL_SECONDS)
+                        return
+                    except asyncio.TimeoutError:
+                        pass
+                    try:
+                        due = await loop.run_in_executor(None, _due_reminders, sid)
+                        for message in due:
+                            log.info("Reminder due")
+                            await browser_ws.send_json({"type": "ReminderDue", "message": message})
+                            spoken = message[:1].lower() + message[1:]
+                            await dg_ws.send(json.dumps({"type": "InjectAgentMessage", "message": f"Here's your reminder: {spoken}."}))
+                    except Exception as exc:
+                        log.warning(f"Reminder check failed: {exc}")
+
             await asyncio.gather(
                 browser_to_deepgram(),
                 deepgram_to_browser(),
                 session_timer(),
+                reminder_watcher(),
             )
 
     except Exception as exc:

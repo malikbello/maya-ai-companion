@@ -243,6 +243,30 @@ def handle_set_alarm_direct(time_str: str, label: str = "") -> str:
         return "I had trouble setting that alarm."
 
 
+_NUMBER_WORDS = {
+    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40,
+    "forty-five": 45, "fifty": 50, "sixty": 60,
+}
+
+
+def _relative_delta(text: str):
+    """'in 5 minutes', '1 minute', 'in one hour', 'half an hour' -> timedelta.
+    The model often drops the 'in', and speech gives number words."""
+    import re as _re
+    from datetime import timedelta
+    t = text.strip().lower()
+    if _re.fullmatch(r"(in\s+)?(half an hour|30 min(ute)?s?)", t):
+        return timedelta(minutes=30)
+    m = _re.fullmatch(r"(?:in\s+)?(\d+|[a-z-]+)\s+(minutes?|mins?|hours?|hrs?)(?:\s+from now)?", t)
+    if not m:
+        return None
+    n = int(m.group(1)) if m.group(1).isdigit() else _NUMBER_WORDS.get(m.group(1))
+    if not n:
+        return None
+    return timedelta(hours=n) if m.group(2).startswith("h") else timedelta(minutes=n)
+
+
 def handle_set_reminder_direct(task: str, time_str: str = "") -> str:
     """
     Set a reminder directly from structured agent parameters.
@@ -258,14 +282,10 @@ def handle_set_reminder_direct(task: str, time_str: str = "") -> str:
             import re as _re
             clean = _re.sub(r'^(?:at\s+the\s+|at\s+|for\s+)', '', time_str.strip(), flags=_re.IGNORECASE).strip()
 
-            # Relative time: "in X minutes" or "in X hours"
-            m = _re.search(r'in\s+(\d+)\s+(minutes?|mins?)', clean, _re.IGNORECASE)
-            if m:
-                reminder_dt = now + timedelta(minutes=int(m.group(1)))
-            else:
-                m = _re.search(r'in\s+(\d+)\s+(hours?)', clean, _re.IGNORECASE)
-                if m:
-                    reminder_dt = now + timedelta(hours=int(m.group(1)))
+            # Relative time: "in 5 minutes", "1 minute", "in one hour", "half an hour"
+            delta = _relative_delta(clean)
+            if delta:
+                reminder_dt = now + delta
 
             # Absolute time formats
             if not reminder_dt:
