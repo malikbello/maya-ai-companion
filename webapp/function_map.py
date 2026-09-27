@@ -611,10 +611,9 @@ def run_function(name: str, args: dict) -> dict:
 # ── Deepgram Settings payload ─────────────────────────────────────────────────
 # Nova-3 keyterm prompting: without it, Nigerian names and places are
 # misheard ("Malik" -> "Movik", "Ibadan" -> "Ibotta") and tools get wrong input.
-_NIGERIAN_PLACES = [
-    "Lagos", "Abuja", "Ibadan", "Kano", "Port Harcourt", "Enugu", "Benin City", "Kaduna", "Jos",
-    "Ilorin", "Abeokuta", "Owerri", "Calabar", "Uyo", "Warri", "Akure", "Osogbo", "Ile-Ife", "Onitsha",
-]
+# Keep this list short: every keyterm is also a false-positive risk
+# ("I've taken it" was heard as "Ikeja", then "Akure", with longer lists).
+_NIGERIAN_PLACES = ["Lagos", "Abuja", "Ibadan", "Kano", "Port Harcourt", "Enugu", "Benin City", "Kaduna"]
 _MEDICINES = ["amlodipine", "metformin", "lisinopril", "losartan", "paracetamol", "ibuprofen", "artemether", "lumefantrine", "insulin"]
 
 
