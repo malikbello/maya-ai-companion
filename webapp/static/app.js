@@ -434,6 +434,11 @@ function openWebSocket() {
     else if (t === 'UICard') {
       showCard(msg.ui_type, msg.ui_data||{}, msg.result_text||'');
     }
+    else if (t === 'Reconnecting') {
+      // the server lost Deepgram for a moment and is resuming the conversation
+      setStatus('connecting', 'Reconnecting…');
+      if (orb) orb.setState('thinking');
+    }
     else if (t === 'Limit') {
       // public demo: session length, concurrency or daily budget reached
       if (msg.message) addTranscript('assistant', msg.message);

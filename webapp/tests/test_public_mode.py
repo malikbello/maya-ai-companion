@@ -205,3 +205,76 @@ def test_spotify_prefers_the_original_over_karaoke():
     ]
     assert spotify_service._best_matches("Essence Wizkid", tracks)[0]["name"] == "Essence (feat. Tems)"
     assert spotify_service._best_matches("Essence karaoke", tracks)[0]["artists"][0]["name"] == "KaraokePro"
+
+
+class _FakeDeepgram:
+    """A scripted Deepgram connection: sends `script`, then either drops
+    (raises) or stays open until closed."""
+
+    def __init__(self, script, drop):
+        import asyncio
+
+        self.script, self.drop, self.sent = script, drop, []
+        self.closed = asyncio.Event()
+
+    async def send(self, data):
+        self.sent.append(data)
+
+    async def close(self):
+        self.closed.set()
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        import json
+
+        for m in self.script:
+            yield json.dumps(m)
+        if self.drop:
+            raise ConnectionError("no close frame received or sent")
+        await self.closed.wait()
+
+
+def test_deepgram_drop_is_resumed_not_fatal(monkeypatch):
+    import json
+
+    first = _FakeDeepgram([{"type": "Welcome"}, {"type": "ConversationText", "role": "user", "content": "Hi Maya"},
+                           {"type": "ConversationText", "role": "assistant", "content": "Hello Malik"}], drop=True)
+    second = _FakeDeepgram([{"type": "SettingsApplied"}], drop=False)
+    conns = iter([first, second])
+
+    async def fake_connect(*a, **k):
+        return next(conns)
+
+    monkeypatch.setattr(server.websockets, "connect", fake_connect)
+    monkeypatch.setattr(server, "RECONNECT_BACKOFF_SECONDS", 0.01)
+    pm.gate._starts.clear()
+    with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+        types = [ws.receive_json()["type"] for _ in range(5)]
+    assert types == ["Welcome", "ConversationText", "ConversationText", "Reconnecting", "SettingsApplied"]
+    resumed = json.loads(second.sent[0])
+    assert "greeting" not in resumed["agent"]  # no second hello
+    assert [m["content"] for m in resumed["agent"]["context"]["messages"]] == ["Hi Maya", "Hello Malik"]
+    assert "greeting" in json.loads(first.sent[0])["agent"]
+
+
+def test_repeated_tool_calls_run_once_per_request(monkeypatch):
+    import json
+
+    call = lambda i: {"type": "FunctionCallRequest", "functions": [{"id": f"c{i}", "name": "stop_reminder", "arguments": "{}"}]}
+    fake = _FakeDeepgram([{"type": "ConversationText", "role": "user", "content": "Play some Afrobeats"}] + [call(i) for i in range(5)], drop=False)
+
+    async def fake_connect(*a, **k):
+        return fake
+
+    ran = []
+    monkeypatch.setattr(server.websockets, "connect", fake_connect)
+    monkeypatch.setattr(server, "_run_in_session", lambda sid, f, a: ran.append(f) or {"result": "Reminder dismissed.", "ui_type": "none", "ui_data": {}})
+    pm.gate._starts.clear()
+    with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+        for _ in range(1 + 5 * 2):  # the user's words, then a loading card and a card per call
+            ws.receive_json()
+    assert ran == ["stop_reminder"]
+    replies = [json.loads(m) for m in fake.sent[1:] if isinstance(m, str) and "FunctionCallResponse" in m]
+    assert len(replies) == 5 and "Already done" in replies[-1]["content"]

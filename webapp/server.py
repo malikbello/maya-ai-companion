@@ -252,6 +252,9 @@ async def voice_proxy(browser_ws: WebSocket):
 
 
 REMINDER_POLL_SECONDS = 5
+MAX_RECONNECTS = 3
+MAX_CALLS_PER_TURN = 6
+RECONNECT_BACKOFF_SECONDS = 1.0
 
 
 def _due_reminders(sid):
@@ -270,177 +273,242 @@ def _run_in_session(sid, fname, args):
 async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
 
     dg_url = "wss://agent.deepgram.com/v1/agent/converse"
+    conn = {"ws": None}     # the current Deepgram connection; replaced on reconnect
+    history = []            # the conversation so far, replayed to Deepgram after a drop
+    stop_event = asyncio.Event()
+    # messages MAYA should say unprompted (due reminders). Deepgram
+    # rejects an injection while she is thinking or talking, so they
+    # wait for her to be idle
+    pending_says = []
+    idle = [False]
+    last_said = [None, 0.0]
+    # tool calls made since the user last spoke: an identical call is
+    # executed once, and a runaway loop is capped (see MAX_CALLS_PER_TURN)
+    turn_calls = {}
 
-    try:
-        async with websockets.connect(
+    async def connect(resume: bool):
+        ws = await websockets.connect(
             dg_url,
             additional_headers={"Authorization": f"Token {dg_key}"},
-            ping_interval=None,
+            # keep-alive pings: a dropped connection is noticed within ~40 s
+            # instead of only when the next send fails
+            ping_interval=20,
+            ping_timeout=20,
             max_size=10 * 1024 * 1024,
-        ) as dg_ws:
-            log.info("Connected to Deepgram Voice Agent")
+        )
+        with pm.session_state(sid):
+            config = pm.filter_settings(build_settings_config())
+        if resume:
+            # carry on the same conversation, without greeting again
+            config["agent"].pop("greeting", None)
+            config["agent"].setdefault("context", {})["messages"] = history[-40:]
+        await ws.send(json.dumps(config))
+        conn["ws"] = ws
+        log.info("Connected to Deepgram Voice Agent" + (" (resumed)" if resume else ""))
 
-            # Send full agent configuration
-            with pm.session_state(sid):
-                config = pm.filter_settings(build_settings_config())
-            await dg_ws.send(json.dumps(config))
-            log.info("Settings sent to Deepgram")
+    async def session_timer():
+        """Public sessions end on time; the page is told why."""
+        if not pm.PUBLIC:
+            return
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=pm.LIMITS["session_seconds"])
+        except asyncio.TimeoutError:
+            stop_event.set()
+            try:
+                await browser_ws.send_json({"type": "Limit", "message": "That's the end of this demo session. Thanks for talking with MAYA."})
+                await browser_ws.close()
+            except Exception:
+                pass
+            if conn["ws"] is not None:
+                await conn["ws"].close()
 
-            stop_event = asyncio.Event()
-            # messages MAYA should say unprompted (due reminders). Deepgram
-            # rejects an injection while she is thinking or talking, so they
-            # wait for her to be idle
-            pending_says = []
-            idle = [False]
-            last_said = [None, 0.0]
-
-            async def session_timer():
-                """Public sessions end on time; the page is told why."""
-                if not pm.PUBLIC:
-                    return
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=pm.LIMITS["session_seconds"])
-                except asyncio.TimeoutError:
-                    stop_event.set()
+    async def browser_to_deepgram():
+        """Forward mic audio from browser to Deepgram. Frames that arrive
+        while reconnecting are dropped: live audio is not worth replaying."""
+        try:
+            while not stop_event.is_set():
+                data = await browser_ws.receive_bytes()
+                ws = conn["ws"]
+                if ws is not None:
                     try:
-                        await browser_ws.send_json({"type": "Limit", "message": "That's the end of this demo session. Thanks for talking with MAYA."})
+                        await ws.send(data)
+                    except Exception:
+                        pass  # the reader below notices the drop and reconnects
+        except (WebSocketDisconnect, Exception):
+            stop_event.set()
+            # unblock deepgram_to_browser so the session ends (and
+            # its metered slot is released) as soon as the visitor leaves
+            if conn["ws"] is not None:
+                await conn["ws"].close()
+
+    async def handle(ws, raw):
+        if isinstance(raw, bytes):
+            # TTS audio: pass straight to browser
+            await browser_ws.send_bytes(raw)
+            return
+
+        msg = json.loads(raw)
+        mtype = msg.get("type", "")
+
+        if mtype == "ConversationText" and msg.get("content"):
+            history.append({"type": "History", "role": msg.get("role", "user"), "content": msg["content"]})
+            if msg.get("role") == "user":
+                turn_calls.clear()
+
+        if mtype in ("UserStartedSpeaking", "AgentThinking", "FunctionCallRequest", "AgentStartedSpeaking"):
+            idle[0] = False
+        elif mtype == "AgentAudioDone":
+            idle[0] = True
+            if pending_says:
+                asyncio.get_running_loop().call_later(0.8, lambda: asyncio.ensure_future(_say_next()))
+        elif mtype in ("InjectionRefused", "Warning") and last_said[0] and time.monotonic() - last_said[1] < 3:
+            # she was busy after all: put it back for the next AgentAudioDone
+            pending_says.insert(0, last_said[0])
+            last_said[0] = None
+            idle[0] = False
+
+        if mtype == "FunctionCallRequest":
+            # Deepgram sends: {"functions": [{"id": ..., "name": ..., "arguments": "{}"}]}
+            for func_call in msg.get("functions", []):
+                fname   = func_call.get("name", "")
+                func_id = func_call.get("id", "")
+                raw_args = func_call.get("arguments", "{}")
+                try:
+                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except Exception:
+                    args = {}
+                log.info(f"Function call: {fname}({args})")
+
+                # Step 1: instantly show a loading card in the browser
+                await browser_ws.send_json({
+                    "type": "UICardLoading",
+                    "function_name": fname,
+                })
+
+                # Step 2: execute the function in the thread pool (non-blocking),
+                # unless it repeats a call already made for this request
+                key = fname + json.dumps(args, sort_keys=True)
+                turn_calls[key] = turn_calls.get(key, 0) + 1
+                if turn_calls[key] > 1 or sum(turn_calls.values()) > MAX_CALLS_PER_TURN:
+                    log.warning(f"Skipped repeated call: {fname}")
+                    result = {"result": "Already done for this request; do not call it again. Answer the user now.",
+                              "ui_type": "none", "ui_data": {}}
+                else:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        result = await loop.run_in_executor(
+                            None, _run_in_session, sid, fname, args
+                        )
+                    except Exception as exc:
+                        log.error(f"Function {fname} error: {exc}")
+                        result = {"result": str(exc), "ui_type": "none", "ui_data": {}}
+
+                # Step 3: FunctionCallResponse and UICard together, so Deepgram
+                # starts speaking as the browser receives the real card
+                await asyncio.gather(
+                    ws.send(json.dumps({
+                        "type": "FunctionCallResponse",
+                        "name": fname,
+                        "id": func_id,
+                        "content": json.dumps(result["result"]),
+                    })),
+                    browser_ws.send_json({
+                        "type": "UICard",
+                        "function_name": fname,
+                        "ui_type": result.get("ui_type", "none"),
+                        "ui_data": result.get("ui_data", {}),
+                        "result_text": result["result"],
+                    }),
+                )
+        else:
+            # Forward everything else to browser as-is
+            await browser_ws.send_json(msg)
+
+    async def deepgram_to_browser():
+        """Forward Deepgram messages to the browser, intercepting function
+        calls. If the connection to Deepgram drops, reconnect and resume the
+        conversation instead of ending the visitor's session."""
+        failures = 0
+        while not stop_event.is_set():
+            ws = conn["ws"]
+            try:
+                if ws is None:
+                    raise ConnectionError("not connected")
+                async for raw in ws:
+                    if stop_event.is_set():
+                        return
+                    failures = 0
+                    await handle(ws, raw)
+                if stop_event.is_set():
+                    return
+                raise ConnectionError("Deepgram closed the connection")
+            except Exception as exc:
+                if stop_event.is_set():
+                    return
+                failures += 1
+                conn["ws"] = None
+                idle[0] = False
+                if failures > MAX_RECONNECTS:
+                    log.error(f"Deepgram connection lost for good: {exc}")
+                    try:
+                        await browser_ws.send_json({"type": "Error", "message": "MAYA lost her connection to the voice service. Please start again."})
                         await browser_ws.close()
                     except Exception:
                         pass
-                    await dg_ws.close()
-
-            async def browser_to_deepgram():
-                """Forward mic audio from browser → Deepgram."""
-                try:
-                    while not stop_event.is_set():
-                        data = await browser_ws.receive_bytes()
-                        await dg_ws.send(data)
-                except (WebSocketDisconnect, Exception):
                     stop_event.set()
-                    # unblock deepgram_to_browser so the session ends (and
-                    # its metered slot is released) as soon as the visitor leaves
-                    await dg_ws.close()
-
-            async def deepgram_to_browser():
-                """Forward Deepgram messages → browser, intercepting function calls."""
-                try:
-                    async for raw in dg_ws:
-                        if stop_event.is_set():
-                            break
-
-                        if isinstance(raw, bytes):
-                            # TTS audio — pass straight to browser
-                            await browser_ws.send_bytes(raw)
-                            continue
-
-                        msg = json.loads(raw)
-                        mtype = msg.get("type", "")
-
-                        if mtype in ("UserStartedSpeaking", "AgentThinking", "FunctionCallRequest", "AgentStartedSpeaking"):
-                            idle[0] = False
-                        elif mtype == "AgentAudioDone":
-                            idle[0] = True
-                            if pending_says:
-                                asyncio.get_running_loop().call_later(0.8, lambda: asyncio.ensure_future(_say_next()))
-                        elif mtype in ("InjectionRefused", "Warning") and last_said[0] and time.monotonic() - last_said[1] < 3:
-                            # she was busy after all: put it back for the next AgentAudioDone
-                            pending_says.insert(0, last_said[0])
-                            last_said[0] = None
-                            idle[0] = False
-
-                        if mtype == "FunctionCallRequest":
-                            # Deepgram sends: {"functions": [{"id":…,"name":…,"arguments":"{}"}]}
-                            for func_call in msg.get("functions", []):
-                                fname   = func_call.get("name", "")
-                                func_id = func_call.get("id", "")
-                                raw_args = func_call.get("arguments", "{}")
-                                try:
-                                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                                except Exception:
-                                    args = {}
-                                log.info(f"Function call: {fname}({args})")
-
-                                # ── Step 1: Instantly show loading card in browser ──
-                                await browser_ws.send_json({
-                                    "type": "UICardLoading",
-                                    "function_name": fname,
-                                })
-
-                                # ── Step 2: Execute function in thread pool (non-blocking) ──
-                                try:
-                                    loop = asyncio.get_running_loop()
-                                    result = await loop.run_in_executor(
-                                        None, _run_in_session, sid, fname, args
-                                    )
-                                except Exception as exc:
-                                    log.error(f"Function {fname} error: {exc}")
-                                    result = {"result": str(exc), "ui_type": "none", "ui_data": {}}
-
-                                # ── Step 3: Send FunctionCallResponse + UICard simultaneously ──
-                                # This means Deepgram starts generating speech at the exact same
-                                # moment the browser receives the real card — no "card then silence".
-                                await asyncio.gather(
-                                    dg_ws.send(json.dumps({
-                                        "type": "FunctionCallResponse",
-                                        "name": fname,
-                                        "id": func_id,
-                                        "content": json.dumps(result["result"]),
-                                    })),
-                                    browser_ws.send_json({
-                                        "type": "UICard",
-                                        "function_name": fname,
-                                        "ui_type": result.get("ui_type", "none"),
-                                        "ui_data": result.get("ui_data", {}),
-                                        "result_text": result["result"],
-                                    }),
-                                )
-
-                        else:
-                            # Forward everything else to browser as-is
-                            await browser_ws.send_json(msg)
-
-                except Exception as exc:
-                    log.error(f"Deepgram→browser error: {exc}")
-                    stop_event.set()
-
-            async def _say_next():
-                """Say the oldest pending message if MAYA is idle; otherwise the
-                next AgentAudioDone calls this again."""
-                if not pending_says or stop_event.is_set() or not idle[0]:
                     return
-                idle[0] = False
-                msg = pending_says.pop(0)
-                last_said[0], last_said[1] = msg, time.monotonic()
-                await dg_ws.send(json.dumps({"type": "InjectAgentMessage", "message": msg}))
+                log.warning(f"Deepgram connection lost ({exc}); reconnecting {failures}/{MAX_RECONNECTS}")
+                try:
+                    await browser_ws.send_json({"type": "Reconnecting"})
+                except Exception:
+                    pass
+                await asyncio.sleep(RECONNECT_BACKOFF_SECONDS * failures)
+                try:
+                    await connect(resume=True)
+                except Exception as exc2:
+                    log.warning(f"Reconnect attempt failed: {exc2}")
 
-            async def reminder_watcher():
-                """A reminder that comes due rings in the page and MAYA
-                says it aloud, the same as on the home device."""
-                loop = asyncio.get_running_loop()
-                while not stop_event.is_set():
-                    try:
-                        await asyncio.wait_for(stop_event.wait(), timeout=REMINDER_POLL_SECONDS)
-                        return
-                    except asyncio.TimeoutError:
-                        pass
-                    try:
-                        due = await loop.run_in_executor(None, _due_reminders, sid)
-                        for message in due:
-                            log.info("Reminder due")
-                            await browser_ws.send_json({"type": "ReminderDue", "message": message})
-                            spoken = message[:1].lower() + message[1:]
-                            pending_says.append(f"Here's your reminder: {spoken}.")
-                            await _say_next()
-                    except Exception as exc:
-                        log.warning(f"Reminder check failed: {exc}")
+    async def _say_next():
+        """Say the oldest pending message if MAYA is idle; otherwise the
+        next AgentAudioDone calls this again."""
+        ws = conn["ws"]
+        if not pending_says or stop_event.is_set() or not idle[0] or ws is None:
+            return
+        idle[0] = False
+        msg = pending_says.pop(0)
+        last_said[0], last_said[1] = msg, time.monotonic()
+        await ws.send(json.dumps({"type": "InjectAgentMessage", "message": msg}))
 
-            await asyncio.gather(
-                browser_to_deepgram(),
-                deepgram_to_browser(),
-                session_timer(),
-                reminder_watcher(),
-            )
+    async def reminder_watcher():
+        """A reminder that comes due rings in the page and MAYA
+        says it aloud, the same as on the home device."""
+        loop = asyncio.get_running_loop()
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=REMINDER_POLL_SECONDS)
+                return
+            except asyncio.TimeoutError:
+                pass
+            try:
+                due = await loop.run_in_executor(None, _due_reminders, sid)
+                for message in due:
+                    log.info("Reminder due")
+                    await browser_ws.send_json({"type": "ReminderDue", "message": message})
+                    spoken = message[:1].lower() + message[1:]
+                    pending_says.append(f"Here's your reminder: {spoken}.")
+                    await _say_next()
+            except Exception as exc:
+                log.warning(f"Reminder check failed: {exc}")
 
+    try:
+        await connect(resume=False)
+        log.info("Settings sent to Deepgram")
+        await asyncio.gather(
+            browser_to_deepgram(),
+            deepgram_to_browser(),
+            session_timer(),
+            reminder_watcher(),
+        )
     except Exception as exc:
         log.error(f"Proxy error: {exc}")
         try:
@@ -449,7 +517,13 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
         except Exception:
             pass
     finally:
+        if conn["ws"] is not None:
+            try:
+                await conn["ws"].close()
+            except Exception:
+                pass
         log.info("Browser session ended")
+
 
 # ── static files ──────────────────────────────────────────────────────────────
 static_dir = Path(__file__).parent / "static"
