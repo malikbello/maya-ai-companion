@@ -963,3 +963,5 @@ body{
 .reminder-due-hint{font-size:11px;color:var(--text-3)}
 @keyframes reminderPulse{50%{box-shadow:0 0 0 1px rgba(255,196,0,.4),0 0 48px rgba(255,196,0,.3)}}
 @media (prefers-reduced-motion:reduce){.reminder-due-card{animation:none}}
+
+.telegram-to{margin-top:10px;font-size:12px;color:var(--text-2)}

@@ -872,8 +872,10 @@ function renderEmergencyCard(d) {
 }
 
 function renderTelegram(d) {
-  const icon   = d.sent ? '✅' : '📤';
-  const label  = d.type === 'health_report' ? 'Health report sent via Telegram' : (d.message ? `"${d.message}"` : 'Message sent');
+  const esc    = s => String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const icon   = d.sent ? '✅' : '⚠️';
+  const label  = d.type === 'health_report' ? 'Health report sent via Telegram' : (d.message ? `"${esc(d.message)}"` : 'Message sent');
+  const to     = d.to ? `<div class="telegram-to">${d.sent ? 'Sent to' : 'Not sent to'} ${esc(d.to)}</div>` : '';
   return `
   <div class="ui-card">
     <div class="card-header">
@@ -885,6 +887,7 @@ function renderTelegram(d) {
         <div class="telegram-check">${icon}</div>
         <div class="telegram-msg-text">${label}</div>
       </div>
+      ${to}
     </div>
   </div>`;
 }
