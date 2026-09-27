@@ -480,9 +480,19 @@ def run_function(name: str, args: dict) -> dict:
     # ── spotify ───────────────────────────────────────────────────
     if name == "play_spotify":
         result = play_music(args.get("query", ""), args.get("device", None))
-        # Fetch the actual track Spotify resolved to (the real name, not the raw query)
-        time.sleep(0.5)
-        sp_info = get_now_playing_structured()
+        # Wait for Spotify to actually switch: reading now-playing straight
+        # away returns the previous track, which MAYA then announced.
+        wanted = result[len("Now playing "):].split(" by ")[0] if result.startswith("Now playing ") else ""
+        sp_info = {}
+        for _ in range(8):
+            time.sleep(0.5)
+            sp_info = get_now_playing_structured()
+            if sp_info.get("is_playing") and (not wanted or sp_info.get("track") == wanted):
+                break
+        else:
+            if wanted:
+                result = (f"Spotify accepted the request for {wanted} but hasn't started playing it. "
+                          "The Spotify app may need a press of play once before it takes remote commands.")
         actual_track  = sp_info.get("track",  "") if sp_info.get("is_playing") else ""
         actual_artist = sp_info.get("artist", "") if sp_info.get("is_playing") else ""
         return resp(result, "spotify", {
