@@ -181,10 +181,20 @@ def _best_matches(query: str, tracks: list) -> list:
     import re as _re
     words = set(_re.findall(r"[a-z0-9]+", query.lower()))
 
+    knockoff = _re.compile(r"karaoke|instrumental|originally performed|made famous|tribute|cover|8-bit|lullaby")
+
     def score(t):
         title = set(_re.findall(r"[a-z0-9]+", t["name"].lower()))
         artists = set(_re.findall(r"[a-z0-9]+", " ".join(a["name"] for a in t["artists"]).lower()))
-        return (len(words & title) * 2 + len(words & artists), t.get("popularity", 0))
+        # a named artist must be the performer, not words in a karaoke title
+        # words that name the performer count once, as the artist; a "feat."
+        # credit in some other song's title must not match them again
+        s = len(words & artists) * 3 + len((words - artists) & title) * 2
+        blob = (t["name"] + " " + " ".join(a["name"] for a in t["artists"])).lower()
+        asked = bool(knockoff.search(" ".join(words)))
+        if knockoff.search(blob):
+            s += 3 if asked else -10  # only when a karaoke/instrumental version was asked for
+        return (s, t.get("popularity", 0))
 
     return sorted(tracks, key=score, reverse=True)
 

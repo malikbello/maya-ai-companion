@@ -190,3 +190,18 @@ def test_one_minute_reminder_waits_a_full_minute():
     out = server._run_in_session(sid, "check_reminders", {})
     assert out["ui_type"] in ("reminders", "none")
     pm.end_session(sid)
+
+
+def test_spotify_prefers_the_original_over_karaoke():
+    import spotify_service
+
+    def t(name, artists, pop):
+        return {"name": name, "artists": [{"name": a} for a in artists], "popularity": pop}
+
+    tracks = [
+        t("Essence (Originally Performed by Wizkid and Tems) - Instrumental Version", ["KaraokePro"], 20),
+        t("MMS", ["Asake", "Wizkid"], 70),
+        t("Essence (feat. Tems)", ["Wizkid", "Tems"], 80),
+    ]
+    assert spotify_service._best_matches("Essence Wizkid", tracks)[0]["name"] == "Essence (feat. Tems)"
+    assert spotify_service._best_matches("Essence karaoke", tracks)[0]["artists"][0]["name"] == "KaraokePro"
