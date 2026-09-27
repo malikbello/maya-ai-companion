@@ -399,6 +399,18 @@ function renderAlarms(d) {
   </div>`;
 }
 
+function renderReminderDue(d) {
+  const esc = s => String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return `
+    <div class="ui-card reminder-due-card">
+      <div class="card-header"><span class="card-header-icon">&#128276;</span><span class="card-header-title">REMINDER</span><span class="reminder-due-time">${esc(d.time)}</span></div>
+      <div class="card-body">
+        <div class="reminder-due-text">${esc(d.message)}</div>
+        <div class="reminder-due-hint">Say "done" or "stop the reminder" to dismiss</div>
+      </div>
+    </div>`;
+}
+
 function renderReminders(d) {
   const reminders = d.reminders || [];
   const newR      = d.task ? d : null;
@@ -1025,7 +1037,7 @@ function renderMedication(d) {
 const _BADGE_MAP = {
   weather:'weather', forecast:'weather',
   health_log:'health', health_summary:'health', wellness_score:'health',
-  alarms:'alarm', reminder_set:'reminder', reminders:'reminder',
+  alarms:'alarm', reminder_set:'reminder', reminders:'reminder', reminder_due:'reminder',
   spotify:'music',
   emergency:'emergency',
   medication:'health',
@@ -1092,6 +1104,7 @@ function renderCard(uiType, uiData) {
     case 'reminders':
     case 'reminder_set':   return renderReminders(uiData);
     case 'reminder_stopped': return renderText({ text: 'Reminder dismissed.' });
+    case 'reminder_due':     return renderReminderDue(uiData);
     case 'spotify':        return renderSpotify(uiData);
     case 'news':           return renderNews(uiData);
     case 'motion':         return renderMotion(uiData);
@@ -1122,7 +1135,7 @@ function getHistoryItem(uiType, uiData, resultText) {
     wellness_score:'⚡', alarms:'⏰', reminder_set:'📝', reminders:'📝',
     spotify:'🎵', news:'📰', motion:'📡', emergency:'🚨',
     telegram:'✈️', time:'🕐', date:'📅', text:'◈', medication:'💊',
-    profile_name:'👤',
+    profile_name:'👤', reminder_due:'🔔',
   };
   const badgeKey = _BADGE_MAP[uiType] || 'default';
   const icon     = icons[uiType] || '◈';

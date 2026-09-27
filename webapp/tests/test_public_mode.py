@@ -119,3 +119,32 @@ def test_gate_daily_budget_and_concurrency():
     assert "other visitors" in g.admit("2.2.2.2")
     g.release(61)
     assert "today" in g.admit("3.3.3.3")
+
+
+def test_forecast_gives_the_model_every_day(monkeypatch):
+    import function_map
+
+    days = [
+        {"date": f"2026-10-0{i}", "day_name": n, "is_today": i == 1, "description": d, "temp_min": 24, "temp_max": 30, "rain_chance": r, "wind_speed": 3.1}
+        for i, (n, d, r) in enumerate([("Monday", "light rain", 80), ("Tuesday", "clear sky", 5), ("Wednesday", "overcast", 30)], start=1)
+    ]
+    monkeypatch.setattr(function_map, "_forecast_raw", lambda city: {"city": city, "country": "NG", "days": days})
+    out = server._run_in_session(pm.new_session(), "get_weather_forecast", {"city": "Ibadan"})
+    assert out["ui_type"] == "forecast" and out["ui_data"]["city"] == "Ibadan"
+    assert "Tuesday" in out["result"] and "5% chance of rain" in out["result"] and "80% chance of rain" in out["result"]
+
+
+def test_due_reminders_fire_once_per_session():
+    from datetime import datetime, timedelta
+
+    a, b = pm.new_session(), pm.new_session()
+    with pm.session_state(a):
+        import user_manager
+
+        past = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        user_manager.get_current_user().add_reminder({"datetime": past, "message": "Take blood pressure medicine", "done": False})
+    assert server._due_reminders(b) == []
+    assert server._due_reminders(a) == ["Take blood pressure medicine"]
+    assert server._due_reminders(a) == []
+    pm.end_session(a)
+    pm.end_session(b)

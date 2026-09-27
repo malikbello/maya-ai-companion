@@ -127,6 +127,7 @@ function showCard(uiType, uiData, resultText) {
   cardTypeBadge.textContent = badge.text;
   cardTypeBadge.className   = `card-type-badge ${badge.cls}`;
   addHistory(uiType, uiData, resultText);
+  if (uiType === 'reminder_stopped') stopReminderChime();
   if (uiType === 'emergency') {
     emergencyOverlay.style.display = uiData.active ? 'flex' : 'none';
     if (uiData.active) startEmergencyAlarm(); else stopEmergencyAlarm();
@@ -185,6 +186,39 @@ function startEmergencyAlarm() {
 function stopEmergencyAlarm() {
   if (_alarmInterval) { clearInterval(_alarmInterval); _alarmInterval = null; }
   // playCtx is shared — don't close it, just stop scheduling new beeps
+}
+
+// ── Reminder chime: a soft bell, repeated until the user answers ─────────────
+let _chimeTimer = null;
+
+function startReminderChime() {
+  stopReminderChime();
+  ensurePlayCtx();
+  if (!playCtx) return;
+  let rounds = 0;
+  function bell() {
+    if (!playCtx || playCtx.state === 'closed' || rounds++ >= 6) return stopReminderChime();
+    const t = playCtx.currentTime;
+    [[1046.5, 0], [1318.5, 0.18], [1568.0, 0.36]].forEach(([f, dt]) => {
+      const osc = playCtx.createOscillator();
+      const gain = playCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, t + dt);
+      gain.gain.setValueAtTime(0.0001, t + dt);
+      gain.gain.exponentialRampToValueAtTime(0.22, t + dt + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dt + 1.2);
+      osc.connect(gain);
+      gain.connect(playCtx.destination);
+      osc.start(t + dt);
+      osc.stop(t + dt + 1.25);
+    });
+  }
+  const go = () => { bell(); _chimeTimer = setInterval(bell, 2600); };
+  if (playCtx.state === 'suspended') playCtx.resume().then(go); else go();
+}
+
+function stopReminderChime() {
+  if (_chimeTimer) { clearInterval(_chimeTimer); _chimeTimer = null; }
 }
 
 // ── History ────────────────────────────────────────────────────────────────────
@@ -355,7 +389,12 @@ function openWebSocket() {
     if (t === 'Welcome' || t === 'SettingsApplied') {
       setStatus('ready','Ready'); if (orb) orb.setState('idle');
     }
+    else if (t === 'ReminderDue') {
+      showCard('reminder_due', { message: msg.message, time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }, `Reminder: ${msg.message}`);
+      startReminderChime();
+    }
     else if (t === 'UserStartedSpeaking') {
+      stopReminderChime();
       setStatus('listening','Listening…');
       if (orb) orb.setState('listening');
       flushTTS();

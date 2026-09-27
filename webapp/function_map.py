@@ -100,6 +100,18 @@ def _forecast_raw(city: str) -> dict:
     return {"city": city, "country": country, "days": days}
 
 
+def _forecast_summary(fc: dict) -> str:
+    """One line per day, in words the model can reason over and speak."""
+    lines = [f"{len(fc['days'])}-day forecast for {fc['city']} (the free forecast covers five days):"]
+    for d in fc["days"]:
+        label = "Today" if d["is_today"] else f"{d['day_name']} {d['date']}"
+        lines.append(
+            f"{label}: {d['description']}, {round(d['temp_min'])} to {round(d['temp_max'])} degrees Celsius, "
+            f"{d['rain_chance']}% chance of rain, wind {d['wind_speed']} m/s."
+        )
+    return "\n".join(lines)
+
+
 def _medication_info(name: str) -> dict:
     """Fetch structured medication info from OpenFDA drug label API (free, no key)."""
     def _clean(lst, max_chars=420):
@@ -305,11 +317,15 @@ def run_function(name: str, args: dict) -> dict:
         return resp(result, "weather", _weather_raw(city))
 
     if name == "get_weather_forecast":
-        days_ahead = int(args.get("days_ahead", 3))
-        result     = _forecast(city, days_ahead)
-        structured = _forecast_raw(city)
+        # The model gets every day with its rain chance, so it can compare
+        # days ("which day this week is dry?"), not just read out one.
+        where      = (args.get("city") or city).strip()
+        days_ahead = int(args.get("days_ahead", 5))
+        structured = _forecast_raw(where)
         structured["requested_days"] = days_ahead
-        return resp(result, "forecast", structured)
+        if not structured["days"]:
+            return resp(_forecast(where, days_ahead), "forecast", structured)
+        return resp(_forecast_summary(structured), "forecast", structured)
 
     # ── alarms ────────────────────────────────────────────────────
     if name == "check_alarms":
@@ -577,6 +593,23 @@ def run_function(name: str, args: dict) -> dict:
 
 
 # ── Deepgram Settings payload ─────────────────────────────────────────────────
+# Nova-3 keyterm prompting: without it, Nigerian names and places are
+# misheard ("Malik" -> "Movik", "Ibadan" -> "Ibotta") and tools get wrong input.
+_NIGERIAN_PLACES = [
+    "Lagos", "Abuja", "Ibadan", "Kano", "Port Harcourt", "Enugu", "Benin City", "Kaduna", "Jos",
+    "Ilorin", "Abeokuta", "Owerri", "Calabar", "Uyo", "Warri", "Akure", "Osogbo", "Ile-Ife", "Onitsha", "Lekki", "Ikeja",
+]
+_MEDICINES = ["amlodipine", "metformin", "lisinopril", "losartan", "paracetamol", "ibuprofen", "artemether", "lumefantrine", "insulin"]
+
+
+def _keyterms(user) -> list:
+    terms = ["MAYA"] + _NIGERIAN_PLACES + _MEDICINES
+    name = user.get_name() if user else ""
+    if name and name not in ("User", ""):
+        terms.append(name)
+    return terms[:100]
+
+
 def build_settings_config() -> dict:
     """Build the full Deepgram Voice Agent Settings payload."""
     user = get_current_user()
@@ -593,7 +626,7 @@ def build_settings_config() -> dict:
         "2. Be concise and warm. Give short friendly answers like a trusted companion — not a written document. "
         "3. Address the user by their first name whenever you know it. "
         "4. ONLY call set_name when the user is explicitly introducing themselves or asking to update their name — e.g. 'my name is', 'I'm called', 'call me', 'please save my name as', 'change my name to'. Do NOT call set_name just because a name is mentioned in conversation, in a story, about another person, or in any other context. If the user mentions their city call set_location. "
-        "5. For weather questions call get_weather for today, get_weather_forecast for future days. Never guess. "
+        "5. For weather questions call get_weather for today, get_weather_forecast for future days. Never guess. When asked to pick a day (for a trip, an event, laundry), compare the days' rain chances and recommend the best one, and say the forecast only covers five days. "
         "6. For time call get_time; for date call get_date. "
         "7. NEVER say filler phrases before calling a function. No 'Let me check', 'Sure', 'Give me a second'. Call silently then speak the answer. "
         "8. Health tracking: log_sleep when user mentions sleep, log_water for water intake, log_mood for mood, log_symptom for symptoms, log_exercise for physical activity, log_medication_taken when they take meds. "
@@ -616,8 +649,8 @@ def build_settings_config() -> dict:
         {"name": "get_time",        "description": "Get the current time",                                 "parameters": {"type": "object", "properties": {}}},
         {"name": "get_date",        "description": "Get today's date",                                    "parameters": {"type": "object", "properties": {}}},
         {"name": "get_weather",     "description": "Get current weather for user's location",             "parameters": {"type": "object", "properties": {}}},
-        {"name": "get_weather_forecast", "description": "Get weather forecast for future days",
-         "parameters": {"type": "object", "properties": {"days_ahead": {"type": "integer", "description": "1=tomorrow up to 5"}}, "required": ["days_ahead"]}},
+        {"name": "get_weather_forecast", "description": "Get the day-by-day forecast (up to five days) with rain chance, for the user's city or another one",
+         "parameters": {"type": "object", "properties": {"days_ahead": {"type": "integer", "description": "1=tomorrow up to 5"}, "city": {"type": "string", "description": "Only if the user names a different city, e.g. a trip destination"}}}},
         {"name": "check_alarms",    "description": "Check all set alarms",                                "parameters": {"type": "object", "properties": {}}},
         {"name": "set_alarm",       "description": "Set a new alarm",
          "parameters": {"type": "object", "properties": {"time": {"type": "string"}, "label": {"type": "string"}}, "required": ["time"]}},
@@ -698,7 +731,7 @@ def build_settings_config() -> dict:
         "agent": {
             "language": "en",
             "context": {"messages": []},
-            "listen": {"provider": {"type": "deepgram", "model": "nova-3"}},
+            "listen": {"provider": {"type": "deepgram", "model": "nova-3", "keyterms": _keyterms(user)}},
             "think":  {
                 "provider":  {"type": "open_ai", "model": "gpt-4o-mini", "temperature": 0.7},
                 "functions": functions,
