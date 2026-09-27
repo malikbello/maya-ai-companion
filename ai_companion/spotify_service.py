@@ -14,6 +14,8 @@ logger = logging.getLogger("AI_Companion")
 
 # Store OAuth cache next to this file so it's found regardless of cwd
 _CACHE_PATH = str(Path(__file__).parent / ".spotify_token_cache")
+# ISO country of the Spotify account, e.g. NG; searches return only tracks playable there
+_MARKET = os.getenv("SPOTIFY_MARKET") or None
 
 try:
     import spotipy
@@ -184,12 +186,14 @@ def play_music(query: str, device_hint: str = None) -> str:
 
     try:
         # Search first (doesn't need a device)
-        results = sp.search(q=query, type="track", limit=1)
+        # Without a market, Spotify's top result can be a release that is not
+        # playable in the listener's country; playback then fails silently.
+        results = sp.search(q=query, type="track", limit=1, market=_MARKET)
         tracks = results.get("tracks", {}).get("items", [])
 
         playlist_fallback = None
         if not tracks:
-            results = sp.search(q=query, type="playlist", limit=1)
+            results = sp.search(q=query, type="playlist", limit=1, market=_MARKET)
             items = results.get("playlists", {}).get("items", [])
             if items:
                 playlist_fallback = items[0]
@@ -274,7 +278,7 @@ def play_artist_music(artist: str, device_hint: str = None) -> str:
                 device_id = _get_device_id(device_hint)
             if device_id is None:
                 return "No active Spotify device found. I tried to launch it but it didn't respond. Please open Spotify and try again."
-        results = sp.search(q=artist, type="artist", limit=1)
+        results = sp.search(q=artist, type="artist", limit=1, market=_MARKET)
         artists = results.get("artists", {}).get("items", [])
         if not artists:
             return f"I could not find the artist {artist} on Spotify."
