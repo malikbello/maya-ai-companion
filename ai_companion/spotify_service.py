@@ -174,6 +174,21 @@ def _get_device_id(device_hint=None):
 # Voice-callable playback functions
 # ------------------------------------------------------------------ #
 
+def _best_matches(query: str, tracks: list) -> list:
+    """Order search results by how well title and artists match the request.
+    Spotify's ranking with limit=1 can put a different song first
+    ("Essence Wizkid" -> "MMS" by Asake)."""
+    import re as _re
+    words = set(_re.findall(r"[a-z0-9]+", query.lower()))
+
+    def score(t):
+        title = set(_re.findall(r"[a-z0-9]+", t["name"].lower()))
+        artists = set(_re.findall(r"[a-z0-9]+", " ".join(a["name"] for a in t["artists"]).lower()))
+        return (len(words & title) * 2 + len(words & artists), t.get("popularity", 0))
+
+    return sorted(tracks, key=score, reverse=True)
+
+
 def play_music(query: str, device_hint: str = None) -> str:
     """
     Play a song, artist, or playlist by name.
@@ -188,8 +203,8 @@ def play_music(query: str, device_hint: str = None) -> str:
         # Search first (doesn't need a device)
         # Without a market, Spotify's top result can be a release that is not
         # playable in the listener's country; playback then fails silently.
-        results = sp.search(q=query, type="track", limit=1, market=_MARKET)
-        tracks = results.get("tracks", {}).get("items", [])
+        results = sp.search(q=query, type="track", limit=10, market=_MARKET)
+        tracks = _best_matches(query, results.get("tracks", {}).get("items", []))
 
         playlist_fallback = None
         if not tracks:
@@ -242,7 +257,14 @@ def play_music(query: str, device_hint: str = None) -> str:
             name = track["name"]
             artist = track["artists"][0]["name"]
             uri = track["uri"]
-            ok = _try_play(lambda: sp.start_playback(device_id=device_id, uris=[uri]))
+            # Start the track inside its album: on some desktop clients a bare
+            # track list is accepted (204) but never loads, while an album
+            # context with an offset plays reliably.
+            album_uri = track.get("album", {}).get("uri")
+            if album_uri:
+                ok = _try_play(lambda: sp.start_playback(device_id=device_id, context_uri=album_uri, offset={"uri": uri}))
+            else:
+                ok = _try_play(lambda: sp.start_playback(device_id=device_id, uris=[uri]))
             if ok:
                 return f"Now playing {name} by {artist}."
             return f"I found {name} by {artist} but could not start playback. Try pressing play in Spotify manually first."
