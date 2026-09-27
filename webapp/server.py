@@ -287,6 +287,9 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
             log.info("Settings sent to Deepgram")
 
             stop_event = asyncio.Event()
+            # messages MAYA should say unprompted (due reminders); Deepgram
+            # refuses an injection while she is talking, so refused ones wait
+            pending_says = []
 
             async def session_timer():
                 """Public sessions end on time; the page is told why."""
@@ -329,6 +332,11 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
 
                         msg = json.loads(raw)
                         mtype = msg.get("type", "")
+
+                        if mtype == "InjectionRefused":
+                            refusals[0] += 1
+                        if mtype == "InjectionRefused" and pending_says:
+                            asyncio.get_running_loop().call_later(2.5, lambda: asyncio.ensure_future(_say_next()))
 
                         if mtype == "FunctionCallRequest":
                             # Deepgram sends: {"functions": [{"id":…,"name":…,"arguments":"{}"}]}
@@ -385,6 +393,20 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
                     log.error(f"Deepgram→browser error: {exc}")
                     stop_event.set()
 
+            async def _say_next():
+                """Offer the oldest pending message; it is dropped only once
+                Deepgram has accepted it (no InjectionRefused within 1.5 s)."""
+                if not pending_says or stop_event.is_set():
+                    return
+                msg = pending_says[0]
+                refused_before = refusals[0]
+                await dg_ws.send(json.dumps({"type": "InjectAgentMessage", "message": msg}))
+                await asyncio.sleep(1.5)
+                if refusals[0] == refused_before and pending_says and pending_says[0] == msg:
+                    pending_says.pop(0)
+
+            refusals = [0]
+
             async def reminder_watcher():
                 """A reminder that comes due rings in the page and MAYA
                 says it aloud, the same as on the home device."""
@@ -401,7 +423,8 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
                             log.info("Reminder due")
                             await browser_ws.send_json({"type": "ReminderDue", "message": message})
                             spoken = message[:1].lower() + message[1:]
-                            await dg_ws.send(json.dumps({"type": "InjectAgentMessage", "message": f"Here's your reminder: {spoken}."}))
+                            pending_says.append(f"Here's your reminder: {spoken}.")
+                            await _say_next()
                     except Exception as exc:
                         log.warning(f"Reminder check failed: {exc}")
 

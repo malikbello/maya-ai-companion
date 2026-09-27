@@ -163,3 +163,13 @@ def test_message_doctor_is_personal_only_and_needs_a_doctor_chat(monkeypatch):
     out = telegram_service.message_doctor("My blood pressure has been high", "Malik")
     assert out["sent"] and sent["chat_id"] == "42"
     assert sent["body"].startswith("Message from Malik, sent by MAYA:") and sent["body"].endswith("My blood pressure has been high")
+
+
+def test_agent_knows_the_saved_name_and_city():
+    sid = pm.new_session()
+    server._run_in_session(sid, "set_name", {"name": "Malik"})
+    server._run_in_session(sid, "set_location", {"city": "Lagos"})
+    with pm.session_state(sid):
+        prompt = server.build_settings_config()["agent"]["think"]["prompt"]
+    assert "The user's name is Malik." in prompt and "lives in Lagos" in prompt
+    pm.end_session(sid)
