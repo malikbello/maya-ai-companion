@@ -37,7 +37,7 @@ Your OpenAI API key is already configured:
 LAUNCHING THE UI:
 =================
 Option 1 - Simple Launch:
-    cd c:\Users\Dell\Downloads\AI_Companion\ai_companion
+    cd ai_companion
     python run_ui.py
 
 Option 2 - With Virtual Environment (from AI_Companion folder):
@@ -96,7 +96,7 @@ If Spotify is unavailable:
   → Other features work normally
 
 If .env keys are missing:
-  → Check that c:\Users\Dell\Downloads\AI_Companion\ai_companion\.env exists
+  → Check that ai_companion\.env exists
   → Verify all required API keys are present
 
 ARCHITECTURE:

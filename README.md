@@ -215,13 +215,13 @@ SPOTIPY_REDIRECT_URI=http://127.0.0.1:8888/callback
 ### Step 1 — Open a terminal and navigate to the app directory
 
 ```powershell
-cd "C:\Users\Dell\Downloads\AI_Companion\ai_companion"
+cd ai_companion
 ```
 
 ### Step 2 — Run using the project virtual environment
 
 ```powershell
-& "C:\Users\Dell\Downloads\AI_Companion\cleanenv\Scripts\python.exe" run_agent_minimal.py
+..\cleanenv\Scripts\python.exe run_agent_minimal.py
 ```
 
 > **Do NOT use** `python run_agent_minimal.py` or any system Python.
@@ -275,7 +275,7 @@ The `.env` file was not found. Make sure you ran the command from inside `ai_com
 ### No audio / microphone silence
 The mic device index may be wrong for your machine. Run the device scanner:
 ```powershell
-& "C:\Users\Dell\Downloads\AI_Companion\cleanenv\Scripts\python.exe" test_devices.py
+..\cleanenv\Scripts\python.exe test_devices.py
 ```
 Then update `MIC_DEVICE` at line ~37 in `voice_agent_deepgram.py`.
 
@@ -286,17 +286,12 @@ Check `.env` has no trailing spaces or inline comments after the secret value.
 This is correct on Windows. The simulation backend is used for testing. On a Raspberry Pi with RPi.GPIO installed, it will automatically switch to the GPIO backend.
 
 ### ModuleNotFoundError on launch
-You are using the wrong Python. Always use:
-```
-C:\Users\Dell\Downloads\AI_Companion\cleanenv\Scripts\python.exe
-```
+You are using the wrong Python. Use the project virtual environment (`cleanenv\Scripts\python.exe`), not the system Python.
 
 ---
 
 ## Development Notes
 
-- **Virtual environment:** `C:\Users\Dell\Downloads\AI_Companion\cleanenv\`
-- **Python version:** 3.9
-- **All type hints** must use `Optional[X]` not `X | None` (Python 3.10+ syntax not supported)
-- **Git repo root:** `C:\Users\Dell\Downloads\AI_Companion\`
-- Last stable commit: `29d3f24` — motion detection module complete
+- **Virtual environment:** `cleanenv/` at the repo root
+- **Python version:** 3.9 for the native pipeline (use `Optional[X]`, not `X | None`); the web app image runs 3.13
+- **Logging:** INFO by default; `MAYA_LOG_LEVEL=DEBUG` for more. Library header logging stays off so API keys never reach the logs.
