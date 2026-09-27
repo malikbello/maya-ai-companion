@@ -213,7 +213,7 @@ def _enrich_reminders(reminders: list) -> list:
         rem = dict(r)
         dt_str = r.get("datetime", "")
         try:
-            dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            dt = datetime.strptime(dt_str[:16], "%Y-%m-%d %H:%M")  # stored with or without seconds
             d  = dt.strftime("%Y-%m-%d")
             if d == today_str:
                 rem["when"]       = "Today"

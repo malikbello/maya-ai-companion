@@ -55,7 +55,8 @@ def add_reminder(time_str: str, message: str):
 def _parse_reminder_time(time_str: str) -> datetime:
     """Try multiple datetime formats to parse a reminder time string."""
     formats = [
-        "%Y-%m-%d %H:%M",          # 2026-05-21 13:15  (canonical)
+        "%Y-%m-%d %H:%M:%S",       # 2026-05-21 13:15:42  (canonical)
+        "%Y-%m-%d %H:%M",          # 2026-05-21 13:15  (older entries)
         "%Y-%m-%d at %I:%M %p",    # 2026-05-21 at 1:15 PM
         "%Y-%m-%d at %I %p",       # 2026-05-21 at 1 PM
         "%Y-%m-%dT%H:%M:%S",       # ISO format
