@@ -603,7 +603,7 @@ def run_function(name: str, args: dict) -> dict:
 # misheard ("Malik" -> "Movik", "Ibadan" -> "Ibotta") and tools get wrong input.
 _NIGERIAN_PLACES = [
     "Lagos", "Abuja", "Ibadan", "Kano", "Port Harcourt", "Enugu", "Benin City", "Kaduna", "Jos",
-    "Ilorin", "Abeokuta", "Owerri", "Calabar", "Uyo", "Warri", "Akure", "Osogbo", "Ile-Ife", "Onitsha", "Lekki", "Ikeja",
+    "Ilorin", "Abeokuta", "Owerri", "Calabar", "Uyo", "Warri", "Akure", "Osogbo", "Ile-Ife", "Onitsha",
 ]
 _MEDICINES = ["amlodipine", "metformin", "lisinopril", "losartan", "paracetamol", "ibuprofen", "artemether", "lumefantrine", "insulin"]
 
@@ -645,8 +645,8 @@ def build_settings_config() -> dict:
         "1. NEVER use markdown formatting of any kind. No asterisks, dashes for lists, pound signs, or numbered lists. TTS speaks every character literally. Use only plain natural sentences. "
         "2. Be concise and warm. Give short friendly answers like a trusted companion — not a written document. "
         "3. Address the user by their first name whenever you know it. "
-        "4. ONLY call set_name when the user is explicitly introducing themselves or asking to update their name — e.g. 'my name is', 'I'm called', 'call me', 'please save my name as', 'change my name to'. Do NOT call set_name just because a name is mentioned in conversation, in a story, about another person, or in any other context. If the user mentions their city call set_location. "
-        "5. For weather questions call get_weather for today, get_weather_forecast for future days. Never guess. When asked to pick a day (for a trip, an event, laundry), compare the days' rain chances and recommend the best one, and say the forecast only covers five days. "
+        "4. ONLY call set_name when the user is explicitly introducing themselves or asking to update their name — e.g. 'my name is', 'I'm called', 'call me', 'please save my name as', 'change my name to'. Do NOT call set_name just because a name is mentioned in conversation, in a story, about another person, or in any other context. Call set_location ONLY when the user says where they live or that they have moved (e.g. 'I live in', 'I've moved to'); a city they are visiting, planning a trip to or asking about is NOT their location, so never overwrite it for that. "
+        "5. For weather questions call get_weather for today, get_weather_forecast for future days. Never guess. Summarise forecasts in two or three short sentences (the overall pattern and anything notable), never day by day; the card shows the details. When asked to pick a day (for a trip, an event, laundry), compare the days' rain chances and recommend the best one in a sentence or two. "
         "6. For time call get_time; for date call get_date. "
         "7. NEVER say filler phrases before calling a function. No 'Let me check', 'Sure', 'Give me a second'. Call silently then speak the answer. "
         "8. Health tracking: log_sleep when user mentions sleep, log_water for water intake, log_mood for mood, log_symptom for symptoms, log_exercise for physical activity, log_medication_taken when they take meds. "

@@ -287,9 +287,12 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
             log.info("Settings sent to Deepgram")
 
             stop_event = asyncio.Event()
-            # messages MAYA should say unprompted (due reminders); Deepgram
-            # refuses an injection while she is talking, so refused ones wait
+            # messages MAYA should say unprompted (due reminders). Deepgram
+            # rejects an injection while she is thinking or talking, so they
+            # wait for her to be idle
             pending_says = []
+            idle = [False]
+            last_said = [None, 0.0]
 
             async def session_timer():
                 """Public sessions end on time; the page is told why."""
@@ -333,10 +336,17 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
                         msg = json.loads(raw)
                         mtype = msg.get("type", "")
 
-                        if mtype == "InjectionRefused":
-                            refusals[0] += 1
-                        if mtype == "InjectionRefused" and pending_says:
-                            asyncio.get_running_loop().call_later(2.5, lambda: asyncio.ensure_future(_say_next()))
+                        if mtype in ("UserStartedSpeaking", "AgentThinking", "FunctionCallRequest", "AgentStartedSpeaking"):
+                            idle[0] = False
+                        elif mtype == "AgentAudioDone":
+                            idle[0] = True
+                            if pending_says:
+                                asyncio.get_running_loop().call_later(0.8, lambda: asyncio.ensure_future(_say_next()))
+                        elif mtype in ("InjectionRefused", "Warning") and last_said[0] and time.monotonic() - last_said[1] < 3:
+                            # she was busy after all: put it back for the next AgentAudioDone
+                            pending_says.insert(0, last_said[0])
+                            last_said[0] = None
+                            idle[0] = False
 
                         if mtype == "FunctionCallRequest":
                             # Deepgram sends: {"functions": [{"id":…,"name":…,"arguments":"{}"}]}
@@ -394,18 +404,14 @@ async def _proxy(browser_ws: WebSocket, dg_key: str, sid):
                     stop_event.set()
 
             async def _say_next():
-                """Offer the oldest pending message; it is dropped only once
-                Deepgram has accepted it (no InjectionRefused within 1.5 s)."""
-                if not pending_says or stop_event.is_set():
+                """Say the oldest pending message if MAYA is idle; otherwise the
+                next AgentAudioDone calls this again."""
+                if not pending_says or stop_event.is_set() or not idle[0]:
                     return
-                msg = pending_says[0]
-                refused_before = refusals[0]
+                idle[0] = False
+                msg = pending_says.pop(0)
+                last_said[0], last_said[1] = msg, time.monotonic()
                 await dg_ws.send(json.dumps({"type": "InjectAgentMessage", "message": msg}))
-                await asyncio.sleep(1.5)
-                if refusals[0] == refused_before and pending_says and pending_says[0] == msg:
-                    pending_says.pop(0)
-
-            refusals = [0]
 
             async def reminder_watcher():
                 """A reminder that comes due rings in the page and MAYA
