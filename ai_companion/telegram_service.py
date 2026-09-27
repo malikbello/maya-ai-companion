@@ -43,6 +43,26 @@ def send_telegram_message(message: str, chat_id=None) -> bool:
 # Voice-callable functions (return spoken strings for MAYA to read)
 # ------------------------------------------------------------------ #
 
+DOCTOR_CHAT_ID = os.getenv("TELEGRAM_DOCTOR_CHAT_ID")
+DOCTOR_NAME = os.getenv("DOCTOR_NAME", "your doctor")
+
+
+def message_doctor(text: str, sender: str = "") -> dict:
+    """Send a note to the user's doctor on Telegram.
+
+    The doctor opens the bot once (/start); their chat ID then goes in
+    TELEGRAM_DOCTOR_CHAT_ID. A bot cannot message someone who has never
+    started it, so there is deliberately no fallback to another chat.
+    """
+    if not BOT_TOKEN or not DOCTOR_CHAT_ID:
+        return {"sent": False, "result": "Your doctor isn't connected on Telegram yet. Add TELEGRAM_DOCTOR_CHAT_ID to the .env file."}
+    who = sender if sender and sender != "User" else "your patient"
+    body = f"Message from {who}, sent by MAYA:\n\n{text.strip()}"
+    if send_telegram_message(body, chat_id=DOCTOR_CHAT_ID):
+        return {"sent": True, "result": f"Sent to {DOCTOR_NAME} on Telegram."}
+    return {"sent": False, "result": "I couldn't reach Telegram just now. Please try again in a moment."}
+
+
 def send_voice_message(text: str) -> str:
     """
     Voice command: send a custom text message via Telegram.

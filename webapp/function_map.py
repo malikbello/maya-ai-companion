@@ -34,6 +34,8 @@ from health_news import get_health_news, get_health_news_by_topic
 from emergency import trigger_emergency, cancel_emergency, set_doctor_contact
 from telegram_service import (
     send_voice_message as _tg_send,
+    message_doctor as _tg_doctor,
+    DOCTOR_NAME as _DOCTOR_NAME,
     send_health_report_telegram as _tg_report,
     check_telegram_status as _tg_status,
 )
@@ -461,7 +463,11 @@ def run_function(name: str, args: dict) -> dict:
     # ── telegram ──────────────────────────────────────────────────
     if name == "send_telegram_message":
         result = _tg_send(args.get("text", ""))
-        return resp(result, "telegram", {"message": args.get("text"), "sent": True})
+        return resp(result, "telegram", {"message": args.get("text"), "sent": result.startswith("Done")})
+
+    if name == "message_doctor":
+        out = _tg_doctor(args.get("text", ""), user.get_name() if user else "")
+        return resp(out["result"], "telegram", {"message": args.get("text"), "sent": out["sent"], "to": _DOCTOR_NAME})
 
     if name == "send_health_report_telegram":
         result = _tg_report()
@@ -634,7 +640,7 @@ def build_settings_config() -> dict:
         "10. EMERGENCY: ONLY call trigger_emergency when the user is CLEARLY in distress and is explicitly asking for emergency help — e.g. 'call emergency', 'SOS', 'send help', 'I need emergency help', 'medical emergency', 'I can't breathe', 'I'm having a heart attack'. Do NOT trigger on casual use of the word 'emergency' in normal conversation (e.g. 'it's not an emergency', 'emergency meeting', 'emergency contact', 'in case of emergency'). If you are unsure, ask: 'Are you okay? Do you need me to call for help?' before triggering. "
         "11. CANCEL EMERGENCY: call cancel_emergency if the user says any of: 'cancel emergency', 'stop emergency', 'cancel SOS', 'stop SOS', 'all clear', 'I am safe', 'I'm safe', 'false alarm', 'never mind', 'abort', 'stop the alarm', 'silence alarm', 'I am fine', 'everything is fine', 'it was a mistake', 'stop it'. "
         "12. SPOTIFY MUSIC CONTROL: call play_spotify to play music by name or genre, play_spotify_artist for a specific artist. If the user says 'on my phone' or 'on my PC/laptop/computer', pass device='phone' or device='pc' to target that device. If the user says stop music, pause music, mute, quiet, silence — call pause_spotify IMMEDIATELY. If the user says close Spotify or quit Spotify — call close_spotify. Call resume_spotify to continue, skip_track for next song, previous_track for the previous song, set_spotify_volume for volume, get_now_playing to check the current track. Never guess — always call the function. "
-        "13. TELEGRAM: send_telegram_message to send a message, send_health_report_telegram for health report, check_telegram_status to verify setup. "
+        "13. TELEGRAM: message_doctor when the user wants to tell or ask their doctor something; read the message back in one short sentence after sending. send_telegram_message to send a message, send_health_report_telegram for health report, check_telegram_status to verify setup. "
         "14. HEALTH NEWS: get_health_news for general news, get_health_news_by_topic for specific topics. "
         "15. MOTION SENSOR: start_motion_monitoring to enable, stop_motion_monitoring to disable, get_motion_status for status, set_motion_cooldown to adjust cooldown. "
         "16. REMINDERS: if the user asks for a reminder but does NOT say what it's for, ask 'What would you like to be reminded about?' first. "
@@ -689,6 +695,8 @@ def build_settings_config() -> dict:
         {"name": "cancel_emergency",     "description": "Cancel active emergency alert",                 "parameters": {"type": "object", "properties": {}}},
         {"name": "set_doctor_contact",   "description": "Save doctor phone number",
          "parameters": {"type": "object", "properties": {"number": {"type": "string"}}, "required": ["number"]}},
+        {"name": "message_doctor", "description": "Send a message to the user's doctor on Telegram. Write the message in the first person, as the user, clearly and politely.",
+         "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The message for the doctor"}}, "required": ["text"]}},
         {"name": "send_telegram_message", "description": "Send Telegram message",
          "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
         {"name": "send_health_report_telegram", "description": "Send weekly health report via Telegram", "parameters": {"type": "object", "properties": {}}},

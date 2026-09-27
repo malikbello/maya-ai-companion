@@ -148,3 +148,18 @@ def test_due_reminders_fire_once_per_session():
     assert server._due_reminders(a) == []
     pm.end_session(a)
     pm.end_session(b)
+
+
+def test_message_doctor_is_personal_only_and_needs_a_doctor_chat(monkeypatch):
+    assert "message_doctor" in pm.PERSONAL_ONLY
+    import telegram_service
+
+    monkeypatch.setattr(telegram_service, "DOCTOR_CHAT_ID", None)
+    assert telegram_service.message_doctor("My blood pressure has been high")["sent"] is False
+    sent = {}
+    monkeypatch.setattr(telegram_service, "BOT_TOKEN", "x")
+    monkeypatch.setattr(telegram_service, "DOCTOR_CHAT_ID", "42")
+    monkeypatch.setattr(telegram_service, "send_telegram_message", lambda body, chat_id=None: sent.update(body=body, chat_id=chat_id) or True)
+    out = telegram_service.message_doctor("My blood pressure has been high", "Malik")
+    assert out["sent"] and sent["chat_id"] == "42"
+    assert sent["body"].startswith("Message from Malik, sent by MAYA:") and sent["body"].endswith("My blood pressure has been high")

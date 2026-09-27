@@ -38,7 +38,7 @@ PUBLIC = os.getenv("MAYA_MODE", "personal").strip().lower() == "public"
 # Functions that reach the owner's accounts, contacts or hardware.
 PERSONAL_ONLY = frozenset({
     "trigger_emergency", "cancel_emergency", "set_doctor_contact", "set_health_emergency_contact",
-    "send_telegram_message", "send_health_report_telegram", "check_telegram_status",
+    "send_telegram_message", "send_health_report_telegram", "check_telegram_status", "message_doctor",
     "play_spotify", "play_spotify_artist", "pause_spotify", "resume_spotify", "close_spotify",
     "skip_track", "previous_track", "set_spotify_volume", "get_now_playing",
     "start_motion_monitoring", "stop_motion_monitoring", "get_motion_status", "set_motion_cooldown",
