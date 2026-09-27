@@ -303,7 +303,9 @@ def handle_set_reminder_direct(task: str, time_str: str = "") -> str:
 
         user = get_current_user()
         if reminder_dt:
-            dt_str = reminder_dt.strftime("%Y-%m-%d %H:%M")
+            # keep the seconds: rounding "in 1 minute" down to the minute made it
+            # ring after as little as a second
+            dt_str = reminder_dt.strftime("%Y-%m-%d %H:%M:%S")
             # Format for speech with colon: "3:52 PM" not "352 PM" or "03:52 PM"
             spoken_time = reminder_dt.strftime("%I:%M %p").lstrip("0")
             user.add_reminder({

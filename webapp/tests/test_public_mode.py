@@ -173,3 +173,20 @@ def test_agent_knows_the_saved_name_and_city():
         prompt = server.build_settings_config()["agent"]["think"]["prompt"]
     assert "The user's name is Malik." in prompt and "lives in Lagos" in prompt
     pm.end_session(sid)
+
+
+def test_one_minute_reminder_waits_a_full_minute():
+    from datetime import datetime
+
+    sid = pm.new_session()
+    server._run_in_session(sid, "set_reminder", {"task": "stretch", "time": "in 1 minute"})
+    with pm.session_state(sid):
+        import user_manager
+
+        stored = user_manager.get_current_user().get_reminders()[-1]["datetime"]
+    due = datetime.strptime(stored, "%Y-%m-%d %H:%M:%S")
+    assert 59 <= (due - datetime.now()).total_seconds() <= 61
+    assert server._due_reminders(sid) == []  # not a second early
+    out = server._run_in_session(sid, "check_reminders", {})
+    assert out["ui_type"] in ("reminders", "none")
+    pm.end_session(sid)
