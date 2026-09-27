@@ -1,0 +1,17 @@
+name: Keep awake
+
+# Render's free plan sleeps a service after 15 idle minutes, and waking it
+# takes about a minute. A light ping keeps the demo responsive for visitors.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: curl -fsS --max-time 120 https://maya-ai-companion-wjgw.onrender.com/health || echo "demo did not answer"

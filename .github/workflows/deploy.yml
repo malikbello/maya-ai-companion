@@ -1,0 +1,54 @@
+name: Deploy
+
+# Production follows main, but only commits that passed CI: this runs when
+# the CI workflow finishes on main, and deploys exactly the commit it tested.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  render:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://maya-ai-companion-wjgw.onrender.com
+    steps:
+      - name: Deploy the tested commit
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE: ${{ secrets.RENDER_SERVICE_ID }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          api="https://api.render.com/v1/services/$SERVICE/deploys"
+          id=$(curl -fsS -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
+               -d "{\"commitId\":\"$SHA\"}" "$api" | jq -r .id)
+          echo "Render deploy $id for $SHA"
+          for i in $(seq 1 60); do
+            status=$(curl -fsS -H "Authorization: Bearer $RENDER_API_KEY" "$api/$id" | jq -r .status)
+            echo "  $status"
+            case "$status" in
+              live) exit 0 ;;
+              build_failed|update_failed|canceled|deactivated) exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "Timed out waiting for the deploy"
+          exit 1
+
+      - name: Smoke test the public URL
+        run: |
+          url=https://maya-ai-companion-wjgw.onrender.com
+          curl -fsS --retry 5 --retry-delay 10 "$url/health"
+          curl -fsS "$url/config" | grep -q '"mode":"public"'
+          curl -fsSI "$url/" | grep -qi "content-security-policy"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/function" -H 'content-type: application/json' -d '{"name":"trigger_emergency"}')" = 403
