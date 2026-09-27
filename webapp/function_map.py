@@ -616,6 +616,20 @@ def _keyterms(user) -> list:
     return terms[:100]
 
 
+def _known_user(user) -> str:
+    """What MAYA already knows, so she doesn't ask for it again."""
+    if not user:
+        return ""
+    facts = []
+    name = user.get_name()
+    if name and name not in ("User", ""):
+        facts.append(f"The user's name is {name}.")
+    city = user.data.get("location")
+    if city and city not in ("Not set", ""):
+        facts.append(f"The user lives in {city}; use it for weather and forecasts unless they name another place.")
+    return (" KNOWN ABOUT THE USER: " + " ".join(facts)) if facts else ""
+
+
 def build_settings_config() -> dict:
     """Build the full Deepgram Voice Agent Settings payload."""
     user = get_current_user()
@@ -743,7 +757,7 @@ def build_settings_config() -> dict:
             "think":  {
                 "provider":  {"type": "open_ai", "model": "gpt-4o-mini", "temperature": 0.7},
                 "functions": functions,
-                "prompt":    SYSTEM_PROMPT,
+                "prompt":    SYSTEM_PROMPT + _known_user(user),
             },
             "speak":    {"provider": {"type": "deepgram", "model": "aura-2-thalia-en"}},
             "greeting": greeting,
