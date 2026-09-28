@@ -4,6 +4,24 @@ A voice-first personal AI assistant that listens, thinks, and speaks in real tim
 Built on Deepgram's unified Voice Agent API (single WebSocket for STT + LLM + TTS),
 with a suite of smart home, health, music, and emergency features callable by voice.
 
+**[Try Maya in your browser](https://maya-ai-companion-wjgw.onrender.com)** · the first visit can take up to a minute to wake the free server.
+
+## The film
+
+[![Watch the Maya film (5:53)](docs/maya-film-poster.jpg)](https://github.com/malikbello/maya-ai-companion/releases/tag/v1.0.0)
+
+Maya working end to end in 5 minutes 53 seconds:
+- conversation and a five-day forecast that helps plan a trip
+- reminders that ring on time
+- health tracking
+- an emergency SOS
+- a message to a doctor on Telegram
+- a song on Spotify
+
+The Telegram and Spotify scenes are shown side by side with the real apps.
+
+The [v1.0.0 release](https://github.com/malikbello/maya-ai-companion/releases/tag/v1.0.0) has the full film in 1080p, its subtitles, and landscape and vertical highlight cuts.
+
 ## Run the webapp with Docker
 
 ```bash
