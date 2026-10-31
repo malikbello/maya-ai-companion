@@ -2,7 +2,7 @@
 # The native voice pipeline (ai_companion/main.py) needs direct host
 # microphone/speaker access and Raspberry Pi GPIO in some modes, so it's
 # meant to run natively rather than in this container — see README.
-FROM python:3.13-slim
+FROM python:3.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
